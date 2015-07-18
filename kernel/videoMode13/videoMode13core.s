@@ -144,7 +144,7 @@ sub_video_mode13:
 	ldi YH,hi8(vram)
 
 	lds r18,free_tile_index
-	ldi r19,90		;maximum possible ramtiles
+	ldi r19,MAX_RAMTILES		;maximum possible ramtiles
 	sub r19,r18
 
 	cpi r18,0
@@ -396,6 +396,7 @@ ramloop:
    out VIDEO,r16   	;output pixel 2
    ld r16,X      	;LUT pixel 3
    mul r17,r15      ;tile index * 32
+   nop
       
    out VIDEO,r16   	;output pixel 3
    ldd XL,Z+2      	;load ram pixels 4,5
@@ -444,24 +445,12 @@ TIMER1_OVF_vect:
 ; r22=RAM tile index
 ;************************************
 CopyTileToRam:
-/*
-	src=tile_table_lo+((bt&0x7f)*64);
-	dest=ram_tiles+(free_tile_index*TILE_HEIGHT*TILE_WIDTH);
-
-	ram_tiles_restore[free_tile_index].addr=ramPtr;//(by*VRAM_TILES_H)+bx+x;
-	ram_tiles_restore[free_tile_index].tileIndex=bt;
-
-	for(j=0;j<64;j++){
-		px=pgm_read_byte(src++);
-		*dest++=px;
-	}
-*/
 	
 	ldi r18,TILE_HEIGHT*TILE_WIDTH/2	;tile size in bytes
 
 	;compute source adress
-	ldi ZL,0;tile_table_lo
-	ldi ZH,0;tile_table_hi
+	clr ZL	;tile_table_lo
+	clr ZH	;tile_table_hi
 	
 	mul r24,r18
 	add ZL,r0
