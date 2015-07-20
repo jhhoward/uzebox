@@ -95,6 +95,305 @@
 
 	}
 
+	#if EXTENDED_PALETTE == 1
+	#define ENCODE_PIXEL_PAIR(x) pgm_read_byte(&PaletteStandardToExtendedTable[x])
+	#define DECODE_PIXEL_PAIR(x) pgm_read_byte(&PaletteExtendedToStandardTable[x])
+	#else
+	#define ENCODE_PIXEL_PAIR(x) x
+	#define DECODE_PIXEL_PAIR(x) x
+	#endif
+
+	void BlitSpriteUnrolled(u8 sprNo,u8 ramTileIndex,u16 tytx,u16 dydx){
+		u8 flags=sprites[sprNo].flags;
+		u8 dy = dydx >> 8;
+		u8 dx = dydx & 0xff;
+		u8 ty = tytx >> 8;
+		u8 tx = tytx & 0xff;
+		u8 w, h;
+		u8 x1, y1;
+		u8 x2, y2;
+		u8 dstX, dstY;
+		s8 xOffset, yOffset;
+		u8 x, y;
+		u8* src =(sprites[sprNo].tileIndex*(TILE_HEIGHT*TILE_WIDTH/2))
+				+sprites_tile_banks[flags>>6];	//add bank adress		
+		u8* dst = &ram_tiles[ramTileIndex*(TILE_HEIGHT*TILE_WIDTH/2)];
+		
+		if(tx == 0)
+		{
+			x1 = 0;
+			x2 = TILE_WIDTH - dx;
+			xOffset = dx;
+		}
+		else
+		{
+			x1 = TILE_WIDTH - dx;
+			x2 = TILE_WIDTH;
+			xOffset = -x1;
+		}
+		if(ty == 0)
+		{
+			y1 = 0;
+			y2 = TILE_WIDTH - dy;
+			yOffset = dy;
+		}
+		else
+		{
+			y1 = TILE_WIDTH - dy;
+			y2 = TILE_WIDTH;
+			yOffset = -y1;
+		}
+		
+		for(y = y1; y < y2; y++)
+		{
+			u8 srcY = y;
+			u8 dstY = y + yOffset;
+			u8 dstX = x1 + xOffset;
+
+			u8* dstPtr;
+			u8 dstPair;
+			u8* srcPtr;
+			u8 srcPair;
+			u8 pixel;
+
+			if(tx == 0)
+			{
+				dstPtr = dst + ((dstY * TILE_WIDTH + dx) >> 1);
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+				srcPtr = src + ((y * TILE_WIDTH) >> 1);
+				srcPair = pgm_read_byte(srcPtr++);
+				
+				switch(dx)
+				{
+					case 0:
+						goto blit_first_pair_aligned;
+					case 1:
+						goto blit_first_pair_unaligned_dst;
+					case 2:
+						goto blit_second_pair_aligned;
+					case 3:
+						goto blit_second_pair_unaligned_dst;
+					case 4:
+						goto blit_third_pair_aligned;
+					case 5:
+						goto blit_third_pair_unaligned_dst;
+					case 6:
+						goto blit_fourth_pair_aligned;
+					case 7:
+						goto blit_fourth_pair_unaligned_dst;
+				}
+			}
+			else
+			{
+				dstPtr = dst + ((dstY * TILE_WIDTH) >> 1);
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+				srcPtr = src + ((y * TILE_WIDTH + (TILE_WIDTH - dx)) >> 1);
+				srcPair = pgm_read_byte(srcPtr++);
+				
+				switch(dx)
+				{
+					case 0:
+						goto blit_line_finished;
+					case 1:
+						goto blit_fourth_pair_unaligned_src;
+					case 2:
+						goto blit_fourth_pair_aligned;
+					case 3:
+						goto blit_third_pair_unaligned_src;
+					case 4:
+						goto blit_third_pair_aligned;
+					case 5:
+						goto blit_second_pair_unaligned_src;
+					case 6:
+						goto blit_second_pair_aligned;
+					case 7:
+						goto blit_first_pair_unaligned_src;
+				}
+			}
+			
+			// Aligned blitting
+			{
+				// First pair
+			blit_first_pair_aligned:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0xF0) | pixel;
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0x0F) | pixel;
+				
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+				srcPair = pgm_read_byte(srcPtr++);
+
+				// Second pair
+			blit_second_pair_aligned:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0xF0) | pixel;
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0x0F) | pixel;
+				
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+				srcPair = pgm_read_byte(srcPtr++);
+
+				// Third pair
+			blit_third_pair_aligned:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0xF0) | pixel;
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0x0F) | pixel;
+				
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+				srcPair = pgm_read_byte(srcPtr++);
+
+				// Fourth pair
+			blit_fourth_pair_aligned:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0xF0) | pixel;
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0x0F) | pixel;
+
+				*dstPtr = ENCODE_PIXEL_PAIR(dstPair); 	
+			}
+			goto blit_line_finished;
+			
+			// Unaligned blitting (dst is unaligned)
+			{
+				// First pair
+			blit_first_pair_unaligned_dst:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+				
+				srcPair = pgm_read_byte(srcPtr++);
+
+				// Second pair
+			blit_second_pair_unaligned_dst:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+				
+				srcPair = pgm_read_byte(srcPtr++);
+
+				// Third pair
+			blit_third_pair_unaligned_dst:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+				
+				srcPair = pgm_read_byte(srcPtr++);
+
+				// Fourth pair
+			blit_fourth_pair_unaligned_dst:
+				pixel = srcPair & 0xF;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+					
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+				
+				*dstPtr = ENCODE_PIXEL_PAIR(dstPair); 	
+			}
+			goto blit_line_finished;
+
+			// Unaligned blitting (src is unaligned)
+			{
+				// First pair
+			blit_first_pair_unaligned_src:
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+
+				srcPair = pgm_read_byte(srcPtr++);
+					
+				pixel = srcPair & 0x0F;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+
+				// Second pair
+			blit_second_pair_unaligned_src:
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+
+				srcPair = pgm_read_byte(srcPtr++);
+					
+				pixel = srcPair & 0x0F;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+
+				// Third pair
+			blit_third_pair_unaligned_src:
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0xF0) | (pixel >> 4);
+
+				srcPair = pgm_read_byte(srcPtr++);
+					
+				pixel = srcPair & 0x0F;
+				if(pixel != TRANSPARENT_PIXEL)
+					dstPair = (dstPair & 0x0F) | (pixel << 4);
+
+				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
+				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
+
+				// Fourth pair
+			blit_fourth_pair_unaligned_src:
+				pixel = srcPair & 0xF0;
+				if(pixel != (TRANSPARENT_PIXEL << 4))
+					dstPair = (dstPair & 0x0F) | (pixel >> 4);
+
+				*dstPtr = ENCODE_PIXEL_PAIR(dstPair); 	
+			}
+			
+			blit_line_finished:;
+		}
+	}
+	
+	
 	void BlitSpriteExtended(u8 sprNo,u8 ramTileIndex,u16 tytx,u16 dydx){
 		
 		u8 flags=sprites[sprNo].flags;
