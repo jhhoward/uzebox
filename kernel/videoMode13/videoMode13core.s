@@ -53,6 +53,7 @@
 .global GetTile
 .global palette
 .global SetPaletteColorAsm
+.global tile_bank
 
 ;Screen Sections Struct offsets
 #define scrollX				0
@@ -91,9 +92,10 @@
 		#error RAM_TILES_COUNT must be a multiple of 8
 	#endif
 
-	ram_tiles:				.space RAM_TILES_COUNT*(TILE_HEIGHT*TILE_WIDTH/2)	;1024+256+840=2120=0x848+0x100=0x948
-	palette:				.space 256											
-	vram: 	  				.space VRAM_SIZE 									
+	ram_tiles:				.space RAM_TILES_COUNT*(TILE_HEIGHT*TILE_WIDTH/2)	; 1024									
+	palette:				.space 256											;+256	
+	vram: 	  				.space VRAM_SIZE 									;+1024
+																				;=2304=0x900+0x100=0xa00 (Scrolling)
 
 
 .section .bss
@@ -105,6 +107,8 @@
 	tile_table_lo:			.byte 1
 	tile_table_hi:			.byte 1
 	font_tile_index:		.byte 1 
+
+	tile_bank:				.byte 1
 
 	overlay_vram:
 	#if SCROLLING == 0 && OVERLAY_LINES >0
@@ -123,6 +127,7 @@
 
 .section .text
 
+#if SCROLLING == 0
 
 ;***************************************************
 ; Mode 13 with NO scrolling
@@ -130,7 +135,7 @@
 sub_video_mode13:
 
 	;wait cycles to align with next hsync
-	WAIT r16,38+14
+	WAIT r16,38+15
 
 
 	;Refresh ramtiles indexes in VRAM 
@@ -150,15 +155,14 @@ sub_video_mode13:
 	cpi r18,0
 	breq no_ramtiles
 	
-	subi r18,-(REG_IO_OFFSET)
-	ldi 16,REG_IO_OFFSET
+	clr 16
 upd_loop:		
 	ld XL,Z+	;load vram offset of ramtile
 	ld XH,Z+
 
 	ld r17,X	;get latest VRAM tile that may have been modified my 
-	st Z+,r17  ;the main program and store it in the restore buffer
-	st X,r16	;write the ramtile index back to vram (adding REG_IO_OFFSET to skip invalid ramtiles)
+	st Z+,r17	;the main program and store it in the restore buffer
+	st X,r16	;write the ramtile index back to vram
 
 	inc r16
 	cp r16,r18
@@ -247,21 +251,18 @@ next_tile_line:
 next_tile_row:
 	clr r22		;current char line			;1	
 
-	adiw YL,VRAM_TILES_H
-	rjmp .
+	;increment vram pointer next row
+	mov r16,YL
+	andi r16,0x7
+	cpi r16,7
+	breq 1f
+	inc YL
+	rjmp 2f
+1:
+	andi YL,0xf8
+	inc YH
+2:
 
-	;clr r0
-	;ldi r19,VRAM_TILES_H
-	;add YL,r19
-	;adc YH,r0
-
-	;dec r24		;overlay done?
-	;brne .+2
-	;movw YL,r8	;main vram
-	;brne .+2
-	;movw r12,r6	;main tile table
-	rjmp .
-	rjmp .
 	nop
 
 	rjmp next_tile_line
@@ -310,41 +311,42 @@ render_tile_line:
 	
 	;Set timer so that it generates an overflow interrupt when
 	;all tiles are rendered
-	ldi r16,lo8(0xffff-(6*8*VRAM_TILES_H)+9-30)
-	ldi r17,hi8(0xffff-(6*8*VRAM_TILES_H)+9-30)
+	ldi r16,lo8(0xffff-(6*8*SCREEN_TILES_H)+9-30)
+	ldi r17,hi8(0xffff-(6*8*SCREEN_TILES_H)+9-30)
 	sts _SFR_MEM_ADDR(TCNT1H),r17
 	sts _SFR_MEM_ADDR(TCNT1L),r16
 	sei
 
-	mov r24,r22	;Y offset in tiles*tile width in bytes (4)
+	lds r18,tile_bank
+	ori r18,1		;set base adress of both ram and rom tiles at 0x100
+
+	mov r24,r22		;Y offset in tiles*tile width in bytes (4)
 	lsl r24
 	lsl r24
 	
 	ldi XH,hi8(palette)
-	nop
 	ldi r16,(TILE_HEIGHT*TILE_WIDTH)/2  ;(bytes per tile)
 	mov r15,r16
 	clr r2
 
-    ld r17,Y+     	;load next tile # from VRAM
+    ld r17,Y     	;load first tile # from VRAM
 	bst r17,7		;set T flag with msbit of tile index. 1=rom, 0=ram tile   
 	andi r17,0x7f   ;clear tile index msbit to have both ram/rom tile bases adress at zero	
 	mul r17,r15 	;tile*32	
     add r0,r24    	;add row offset to tile table addr
+	adc r1,r18		;add rom tile bank offset
 	movw ZL,r0
-	
+
 	lpm XL,Z+       ;load rom pixels 0,1
-	nop	
-	nop
 	brtc ramloop
 	rjmp .
 
 romloop:
 	ld   r16,X+		;LUT pixel 0
-	nop
+	subi YL,-8		;VRAM+8
 
 	out VIDEO,r16	;output pixel 0
-	ld 	r17,Y+		;load next tile index 
+	ld 	r17,Y		;load next tile index from VRAM
 	bst r17,7		;set T flag with msbit of tile index. 1=rom, 0=ram tile   
 	ld 	r16,X		;LUT pixel 1
 
@@ -371,51 +373,51 @@ romloop:
 	movw ZL,r0      ;copy next tile address
 
 	out VIDEO,r16   ;output pixel 6
-	add ZL,r24		;add Y tile offset. Cannot overflow in ZH because tile table is aligned to zero.
+	add ZL,r24		;add Y tile offset. 
+	adc ZH,r18		;add rom tile bank offset 
 	lpm XL,Z+       ;load rom pixels 0,1
-  	nop
 	 
 mainloop:
-   out VIDEO,r17	;output pixel 7 (ram & rom)
-   brts romloop
+	out VIDEO,r17	;output pixel 7 (ram & rom)
+	brts romloop
 
 ramloop: 
-   ld XL,-Z			;load ram pixels 0,1
-   ld r16,X+		;LUT pixel 0
-   
-   out VIDEO,r16   	;output pixel 0
-   ld r16,X      	;LUT pixel 1
-   ld r17,Y+      	;next tile
-   bst r17,7      	;set T flag with msbit of tile index. 1=rom, 0=ram tile     
-   
-   out VIDEO,r16   	;output pixel 1
-   ldd XL,Z+1      	;load ram pixels 2,3
-   ld r16,X+      	;LUT pixel 2
-   andi r17,0x7f   	;clear tile index msbit to have both ram/rom tile bases adress at zero
-      
-   out VIDEO,r16   	;output pixel 2
-   ld r16,X      	;LUT pixel 3
-   mul r17,r15      ;tile index * 32
-   nop
-      
-   out VIDEO,r16   	;output pixel 3
-   ldd XL,Z+2      	;load ram pixels 4,5
-   ld r16,X+      	;LUT pixel 4
-   nop
-   
-   out VIDEO,r16   	;output pixel 4
-   ld r16,X      	;LUT pixel 5
-   ldd XL,Z+3      	;load ram pixels 6,7
-   movw ZL,r0      	;copy tile pointer
-   
-   out VIDEO,r16   	;output pixel 5
-   ld r16,X+      	;LUT pixel 6
-   ld r17,X      	;LUT pixel 7
-   add ZL,r24		;add Y tile offset. Cannot overflow in ZH because tile table is aligned to zero.
-   
-   out VIDEO,r16   	;output pixel 6
-   lpm XL,Z+      	;load rom pixels 0,1
-   rjmp mainloop	
+	ld XL,-Z		;load ram pixels 0,1
+	ld r16,X+		;LUT pixel 0
+
+	out VIDEO,r16   ;output pixel 0
+	ld r16,X      	;LUT pixel 1
+	ldd XL,Z+1      ;load ram pixels 2,3
+	subi YL,-8		;VRAM+8
+
+	out VIDEO,r16   ;output pixel 1
+	ld r17,Y      	;load next tile from VRAM
+	bst r17,7      	;set T flag with msbit of tile index. 1=rom, 0=ram tile     
+	ld r16,X+      	;LUT pixel 2
+  
+	out VIDEO,r16   ;output pixel 2
+	andi r17,0x7f   ;clear tile index msbit to have both ram/rom tile bases adress at zero
+	ld r16,X      	;LUT pixel 3
+	mul r17,r15     ;tile index * 32
+     
+	out VIDEO,r16   ;output pixel 3
+	ldd XL,Z+2      ;load ram pixels 4,5
+	ld r16,X+      	;LUT pixel 4
+	add r0,24		;add Y tile offset. 
+
+	out VIDEO,r16   ;output pixel 4
+	ld r16,X      	;LUT pixel 5
+	ldd XL,Z+3      ;load ram pixels 6,7
+	adc r1,r18		;add rom tile bank offset 
+
+	out VIDEO,r16   ;output pixel 5
+	ld r16,X+      	;LUT pixel 6
+	ld r17,X      	;LUT pixel 7
+	movw ZL,r0      ;copy tile pointer
+
+	out VIDEO,r16   ;output pixel 6
+	lpm XL,Z+      	;load rom pixels 0,1
+	rjmp mainloop	
 
 
 ;end of render line   
@@ -436,7 +438,468 @@ TIMER1_OVF_vect:
 
 	ret	;TCNT1 must be equal to 0x0029
 
+#else
 
+;***************************************************
+; Mode 13 with scrolling
+;***************************************************	
+sub_video_mode13:
+
+	;wait cycles to align with next hsync
+	WAIT r16,61
+
+
+	;Refresh ramtiles indexes in VRAM 
+	;This has to be done because the main
+	;program may have altered the VRAM
+	;after vsync and the rendering interrupt.
+	ldi ZL,lo8(ram_tiles_restore);
+	ldi ZH,hi8(ram_tiles_restore);
+
+	ldi YL,lo8(vram)
+	ldi YH,hi8(vram)
+
+	lds r18,free_tile_index
+	ldi r19,MAX_RAMTILES		;maximum possible ramtiles
+	sub r19,r18
+
+	cpi r18,0
+	breq no_ramtiles
+	
+	clr 16
+upd_loop:		
+	ld XL,Z+	;load vram offset of ramtile
+	ld XH,Z+
+
+	ld r17,X	;get latest VRAM tile that may have been modified my 
+	st Z+,r17	;the main program and store it in the restore buffer
+	st X,r16	;write the ramtile index back to vram
+
+	inc r16
+	cp r16,r18
+	brlo upd_loop ;loop is 14 cycles
+
+no_ramtiles:
+	;wait for remaining maximum possible ramtiles
+1:	
+	ldi r17,3
+	dec r17
+	brne .-4
+	rjmp .
+	dec r19
+	brne 1b
+
+
+	ldi YL,lo8(vram)
+	ldi YH,hi8(vram)
+	//add X scroll (coarse)
+	lds r18,screen_scrollX ;ScreenScrollX
+	andi r18,0xf8	;(x>>3) * 8 interleave
+	add YL,r18
+
+
+	ldi r16,SCREEN_TILES_V*TILE_HEIGHT; total scanlines to draw (28*8)
+	mov r10,r16
+	clr r22
+
+	;clear any pending timer int (to avoid a crashing bug in uzem 1.20 and previous)
+	ldi ZL,(1<<OCF1B)+(1<<OCF1A)+(1<<TOV1)
+	sts _SFR_MEM_ADDR(TIFR1),ZL
+
+	;set timer1 OVF interrupt
+	;this trick allows to exist the main loops 
+	;when the 30 tiles are rendered 
+	ldi r16,(1<<TOIE1)
+	sts _SFR_MEM_ADDR(TIMSK1),r16
+	
+	ldi r16,(0<<WGM12)+(1<<CS10)	;switch to timer1 normal mode (mode 0)
+	sts _SFR_MEM_ADDR(TCCR1B),r16
+
+	nop
+	nop
+	nop
+	nop
+
+;****************************************
+; Rendering main loop starts here
+;****************************************
+;r10    = total lines to draw
+;r22	=Y tile row
+;Y      = vram or overlay_ram if overlay_height>0
+;
+next_tile_line:	
+	rcall hsync_pulse ;64320 66140
+	WAIT r19,232 - AUDIO_OUT_HSYNC_CYCLES
+
+	;***draw line***
+	call render_tile_line
+
+	WAIT r19,77
+
+	dec r10
+	breq frame_end
+
+	inc r22
+	lpm ;3 nop
+
+	cpi r22,TILE_HEIGHT ;last char line? 1
+	breq next_tile_row 
+
+	;wait to align with next_tile_row instructions (+1 cycle for the breq)
+	WAIT r19,11
+	
+	rjmp next_tile_line	
+
+next_tile_row:
+	clr r22		;current char line			;1	
+
+	;increment vram pointer next row
+	mov r16,YL
+	andi r16,0x7
+	cpi r16,7
+	breq 1f
+	inc YL
+	rjmp 2f
+1:
+	andi YL,0xf8
+	inc YH
+2:
+
+	nop
+
+	rjmp next_tile_line
+
+frame_end:
+
+	WAIT r19,18
+
+	rcall hsync_pulse ;145
+
+	clr r1
+	call RestoreBackground
+
+	;set vsync flag & flip field
+	lds ZL,sync_flags
+	ldi r20,SYNC_FLAG_FIELD
+	ori ZL,SYNC_FLAG_VSYNC
+	eor ZL,r20
+	sts sync_flags,ZL
+	
+	;clear any pending timer int
+	ldi ZL,(1<<OCF1B)+(1<<OCF1A)+(1<<TOV1)
+	sts _SFR_MEM_ADDR(TIFR1),ZL
+
+	ldi r16,(1<<WGM12)+(1<<CS10)	;switch back to timer1 CTC mode (mode 4)
+	sts _SFR_MEM_ADDR(TCCR1B),r16
+
+	ldi r16,(1<<OCIE1A)				;restore ints on compare match
+	sts _SFR_MEM_ADDR(TIMSK1),r16
+
+	ret
+
+
+
+;*************************************************
+; RENDER TILE LINE
+;
+; r10	= total lines to draw
+; r22	= Y offset in tile
+; Y		= VRAM adress to draw from (must not be modified)
+;*************************************************
+render_tile_line:
+
+	push YL
+	push YH
+	
+	;Set timer so that it generates an overflow interrupt when
+	;all tiles are rendered
+	ldi r16,lo8(0xffff-(6*8*SCREEN_TILES_H)+9-30-46-1-16)
+	ldi r17,hi8(0xffff-(6*8*SCREEN_TILES_H)+9-30-46-1-16)
+	sts _SFR_MEM_ADDR(TCNT1H),r17
+	sts _SFR_MEM_ADDR(TCNT1L),r16
+	sei
+
+	lds r18,tile_bank
+	ori r18,1		;set base adress of both ram and rom tiles at 0x100
+
+	mov r24,r22		;compute byte offset in current tilen accounting for y offset		
+	lsl r24			;Y offset in tile*tile width in bytes (4)
+	lsl r24			;
+	
+	ldi XH,hi8(palette)
+	ldi r16,(TILE_HEIGHT*TILE_WIDTH)/2  ;(bytes per tile)
+	mov r15,r16		;tile size in bytes
+	
+	clr r2			;black pixel for end of line
+	clr r3
+	clr r4
+	clr r5	
+	inc r4			;always 1
+	
+	subi YL,-8
+    ld r17,Y    	;load second tile # from VRAM
+	bst r17,7		;set T flag with msbit of tile index. 1=rom, 0=ram tile   
+	andi r17,0x7f   ;clear tile index msbit to have both ram/rom tile bases adress at zero	
+	mul r17,r15 	;tile*32	
+    add r0,r24    	;add row offset to tile table addr
+	adc r1,r18		;add rom tile bank offset
+	movw ZL,r0
+	lpm XL,Z       ;load rom pixels 0,1
+	ld	r17,Z
+	brts .+2
+	mov XL,r17
+
+	movw r6,ZL		;save Z pointer for main loop (ram)
+	adiw ZL,1	
+	brtc .+2
+	movw r6,ZL		;save Z pointer for main loop (rom)
+
+	ld	r16,X+		;save firt LUT pixel for main loop
+	mov r8,XL		;save LUT table ptr for main loop
+
+	subi YL,8
+	ld r17,Y     	;load first tile # from VRAM
+	mov r5,r17		;save for rom or ram check
+	andi r17,0x7f   ;clear tile index msbit to have both ram/rom tile bases adress at zero	
+	mul r17,r15 	;tile*32	
+    add r0,r24    	;add row offset to tile table addr
+	adc r1,r18		;add rom tile bank offset
+	movw ZL,r0
+	subi YL,-8
+ 
+
+	lds r19,screen_scrollX
+	andi r19,7		;keep fine scroll
+	mov r0,r19
+	lsr r0			;adress pixel (2 per byte)
+	add ZL,r0
+	adc ZH,r3
+
+	sbrc r5,7
+	rjmp rom_scroll
+	nop
+
+ram_scroll:
+	ld  XL,Z
+	nop		
+	;ajust pointers for odd pixels
+	sbrc r19,0
+	inc XL
+	sbrc r19,0
+	inc ZL
+	sbrc r19,0
+	adc ZH,r3
+
+	ldi r20,4		;instructions between outs
+	mul r19,r20
+	ldi r20,lo8(pm(ram_jtbl))
+	ldi r21,hi8(pm(ram_jtbl))
+	add r20,r0
+	adc r21,r1
+	push r20
+	push r21
+	ret
+
+ram_jtbl:		
+	ld XL,Z+
+	ld	r17,X+
+	nop
+	out VIDEO,r17
+
+	rjmp .
+	ld	r17,X
+	nop
+	out VIDEO,r17
+
+	ld XL,Z+
+	ld	r17,X+
+	nop
+	out VIDEO,r17
+
+	rjmp .
+	ld	r17,X
+	nop
+	out VIDEO,r17
+
+	ld XL,Z+
+	ld	r17,X+
+	nop
+	out VIDEO,r17
+
+	rjmp .
+	ld	r17,X
+	nop
+	out VIDEO,r17
+
+	ld XL,Z+
+	ld	r17,X+
+	nop
+	out VIDEO,r17
+
+	;sub r6,r4
+	;sbc r7,r3
+	rjmp .
+	ld	r17,X
+	nop
+	out VIDEO,r17
+
+	movw ZL,r6
+	mov XL,r8      ;copy rom pixels 0,1
+	brts rom_in
+	rjmp ram_in
+
+rom_scroll:
+	lpm  XL,Z		
+	;ajust pointers for odd pixels
+	sbrc r19,0
+	inc XL
+	sbrc r19,0
+	inc ZL
+	sbrc r19,0
+	adc ZH,r3
+
+	ldi r20,3		;instructions between outs
+	mul r19,r20
+	ldi r20,lo8(pm(rom_jtbl))
+	ldi r21,hi8(pm(rom_jtbl))
+	add r20,r0
+	adc r21,r1
+	push r20
+	push r21
+	ret
+
+rom_jtbl:		
+	lpm XL,Z+
+	ld	r17,X+
+	out VIDEO,r17
+	lpm
+	ld	r17,X
+	out VIDEO,r17
+	lpm XL,Z+
+	ld	r17,X+
+	out VIDEO,r17
+	lpm
+	ld	r17,X
+	out VIDEO,r17
+	lpm XL,Z+
+	ld	r17,X+
+	out VIDEO,r17
+	lpm
+	ld	r17,X
+	out VIDEO,r17
+	lpm XL,Z+
+	ld	r17,X+
+	out VIDEO,r17
+	lpm
+	ld	r17,X
+	out VIDEO,r17
+
+	movw ZL,r6
+	mov XL,r8      ;copy rom pixels 0,1
+	brts rom_in
+	rjmp ram_in
+
+
+
+romloop:
+	ld   r16,X+		;LUT pixel 0
+rom_in:
+	subi YL,-8		;VRAM+8
+	out VIDEO,r16	;output pixel 0
+	ld 	r17,Y		;load next tile index from VRAM
+	bst r17,7		;set T flag with msbit of tile index. 1=rom, 0=ram tile   
+	ld 	r16,X		;LUT pixel 1
+
+	out VIDEO,r16   ;output pixel 1
+	lpm XL,Z+		;load rom pixels 2,3
+	ld  r16,X+      ;LUT pixel 2
+
+	out VIDEO,r16   ;output pixel 2
+	andi r17,0x7f   ;clear tile index msbit to have both ram/rom tile bases adress at zero
+	mul r17,r15     ;tile index * 32
+	ld   r16,X      ;LUT pixel 3
+
+	out VIDEO,r16   ;output pixel 3
+	lpm XL,Z+		;load rom pixels 4,5
+	ld   r16,X+     ;LUT pixel 4
+
+	out VIDEO,r16   ;output pixel 4
+	ld   r16,X      ;LUT pixel 5
+	lpm XL,Z		;load rom pixels 6,7   
+
+	out VIDEO,r16   ;output pixel 5
+	ld   r16,X+     ;LUT pixel 6
+	ld   r17,X      ;LUT pixel 7
+	movw ZL,r0      ;copy next tile address
+
+	out VIDEO,r16   ;output pixel 6
+	add ZL,r24		;add Y tile offset. 
+	adc ZH,r18		;add rom tile bank offset 
+	lpm XL,Z+       ;load rom pixels 0,1
+	 
+mainloop:
+	out VIDEO,r17	;output pixel 7 (ram & rom)
+	brts romloop
+
+ramloop: 
+	ld XL,-Z		;load ram pixels 0,1
+	ld r16,X+		;LUT pixel 0
+ram_in:
+	out VIDEO,r16   ;output pixel 0
+	ld r16,X      	;LUT pixel 1
+	ldd XL,Z+1      ;load ram pixels 2,3
+	subi YL,-8		;VRAM+8
+
+	out VIDEO,r16   ;output pixel 1
+	ld r17,Y      	;load next tile from VRAM
+	bst r17,7      	;set T flag with msbit of tile index. 1=rom, 0=ram tile     
+	ld r16,X+      	;LUT pixel 2
+  
+	out VIDEO,r16   ;output pixel 2
+	andi r17,0x7f   ;clear tile index msbit to have both ram/rom tile bases adress at zero
+	ld r16,X      	;LUT pixel 3
+	mul r17,r15     ;tile index * 32
+     
+	out VIDEO,r16   ;output pixel 3
+	ldd XL,Z+2      ;load ram pixels 4,5
+	ld r16,X+      	;LUT pixel 4
+	add r0,24		;add Y tile offset. 
+
+	out VIDEO,r16   ;output pixel 4
+	ld r16,X      	;LUT pixel 5
+	ldd XL,Z+3      ;load ram pixels 6,7
+	adc r1,r18		;add rom tile bank offset 
+
+	out VIDEO,r16   ;output pixel 5
+	ld r16,X+      	;LUT pixel 6
+	ld r17,X      	;LUT pixel 7
+	movw ZL,r0      ;copy tile pointer
+
+	out VIDEO,r16   ;output pixel 6
+	lpm XL,Z+      	;load rom pixels 0,1
+	rjmp mainloop	
+
+
+;end of render line   
+TIMER1_OVF_vect:
+   out VIDEO,r2
+
+
+	pop r0	;pop & discard OVF interrupt return address
+	pop r0	;pop & discard OVF interrupt return address
+	
+	pop YH
+	pop YL
+
+	;restore timer1 to the value it should normally have at this point
+	ldi r16,lo8(0x009)
+	sts _SFR_MEM_ADDR(TCNT1H),r2
+	sts _SFR_MEM_ADDR(TCNT1L),r16
+
+	ret	;TCNT1 must be equal to 0x0029
+
+
+#endif
 
 ;***********************************
 ; Copy a flash tile to a ram tile
@@ -449,28 +912,24 @@ CopyTileToRam:
 	ldi r18,TILE_HEIGHT*TILE_WIDTH/2	;tile size in bytes
 
 	;compute source adress
-	clr ZL	;tile_table_lo
-	clr ZH	;tile_table_hi
-	
+	clr ZL				;tile_table_lo
+	lds ZH,tile_bank	;tile_table_hi
+	ori ZH,1			;add 0x100 offset	
 	mul r24,r18
 	add ZL,r0
 	adc ZH,r1
 
 	;compute destination adress
-	;skip invalid ramtiles
-	ldi XL,lo8(8*32)
-	ldi XH,hi8(8*32)
 	mul r22,r18
-	add XL,r0
-	adc XH,r1
+	movw XL,r0
+	subi XL,lo8(-(ram_tiles))
+	sbci XH,hi8(-(ram_tiles))
 
-	clr r0
 	;copy data (fastest possible)
 .rept TILE_HEIGHT*TILE_WIDTH/2
 	lpm r0,Z+	
 	st X+,r0
 .endr
-
 
 	clr r1
 	ret
@@ -995,6 +1454,9 @@ SetFont:
 	add r20,21
 	rjmp SetTile	
 
+
+
+
 ;***********************************
 ; SET TILE 8bit mode
 ; C-callable
@@ -1004,6 +1466,7 @@ SetFont:
 ;************************************
 .section .text.SetTile
 SetTile:
+
 #if SCROLLING == 1
 	;index formula is vram[((y>>3)*256)+8x+(y&7)]
 	
@@ -1021,7 +1484,7 @@ SetTile:
 	andi r23,7		;y&7	
 	add XL,r23
 						
-	subi r20,~(RAM_TILES_COUNT-1)	
+	subi r20,~(127)	
 	st X,r20
 
 	clr r1
@@ -1043,7 +1506,7 @@ SetTile:
 	add XL,r0
 	adc XH,r1
 	
-	subi r20,~(RAM_TILES_COUNT-1)	
+	subi r20,~(127)	
 	st X,r20
 
 	clr r1

@@ -59,6 +59,7 @@
 #else
 	#define VRAM_TILES_H 32
 	#define SCREEN_TILES_H 28
+	#define FILL_DELAY 0
 #endif
 
 #ifndef SCREEN_TILES_V
@@ -131,11 +132,6 @@
 	#define MAX_PALETTE_COLORS 8
 	#define TRANSPARENT_COLOR 0x1
 #endif
-
-//ramtiles table base is at 0x0000 
-//the number of unusable ramtiles to skip 
-//the register file and the IO registers
-#define REG_IO_OFFSET 8
 
 //maximum possible ramtiles. The limit is
 //controller by the cycles available in the
