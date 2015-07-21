@@ -216,11 +216,11 @@
 				// First pair
 			blit_first_pair_aligned:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0xF0) | pixel;
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0x0F) | pixel;
 				
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -230,11 +230,11 @@
 				// Second pair
 			blit_second_pair_aligned:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0xF0) | pixel;
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0x0F) | pixel;
 				
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -244,11 +244,11 @@
 				// Third pair
 			blit_third_pair_aligned:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0xF0) | pixel;
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0x0F) | pixel;
 				
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -258,11 +258,11 @@
 				// Fourth pair
 			blit_fourth_pair_aligned:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0xF0) | pixel;
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0x0F) | pixel;
 
 				*dstPtr = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -274,14 +274,14 @@
 				// First pair
 			blit_first_pair_unaligned_dst:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
 				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0xF0) | (pixel >> 4);
 				
 				srcPair = pgm_read_byte(srcPtr++);
@@ -289,14 +289,14 @@
 				// Second pair
 			blit_second_pair_unaligned_dst:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
 				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0xF0) | (pixel >> 4);
 				
 				srcPair = pgm_read_byte(srcPtr++);
@@ -304,14 +304,14 @@
 				// Third pair
 			blit_third_pair_unaligned_dst:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
 				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
 					
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0xF0) | (pixel >> 4);
 				
 				srcPair = pgm_read_byte(srcPtr++);
@@ -319,16 +319,9 @@
 				// Fourth pair
 			blit_fourth_pair_unaligned_dst:
 				pixel = srcPair & 0xF;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
-				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
-				dstPair = DECODE_PIXEL_PAIR(*dstPtr);
-					
-				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
-					dstPair = (dstPair & 0xF0) | (pixel >> 4);
-				
 				*dstPtr = ENCODE_PIXEL_PAIR(dstPair); 	
 			}
 			goto blit_line_finished;
@@ -338,13 +331,13 @@
 				// First pair
 			blit_first_pair_unaligned_src:
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0xF0) | (pixel >> 4);
 
 				srcPair = pgm_read_byte(srcPtr++);
 					
 				pixel = srcPair & 0x0F;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -353,13 +346,13 @@
 				// Second pair
 			blit_second_pair_unaligned_src:
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0xF0) | (pixel >> 4);
 
 				srcPair = pgm_read_byte(srcPtr++);
 					
 				pixel = srcPair & 0x0F;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -368,13 +361,13 @@
 				// Third pair
 			blit_third_pair_unaligned_src:
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0xF0) | (pixel >> 4);
 
 				srcPair = pgm_read_byte(srcPtr++);
 					
 				pixel = srcPair & 0x0F;
-				if(pixel != TRANSPARENT_PIXEL)
+				if(pixel != TRANSPARENT_COLOR)
 					dstPair = (dstPair & 0x0F) | (pixel << 4);
 
 				*dstPtr++ = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -383,7 +376,7 @@
 				// Fourth pair
 			blit_fourth_pair_unaligned_src:
 				pixel = srcPair & 0xF0;
-				if(pixel != (TRANSPARENT_PIXEL << 4))
+				if(pixel != (TRANSPARENT_COLOR << 4))
 					dstPair = (dstPair & 0x0F) | (pixel >> 4);
 
 				*dstPtr = ENCODE_PIXEL_PAIR(dstPair); 	
@@ -669,11 +662,15 @@
 							}
 				
 							if(bt<RAM_TILES_COUNT){				
+							#if 1
+								BlitSpriteUnrolled(i,bt,(y<<8)+x,(dy<<8)+dx);						
+							#else
 								#if EXTENDED_PALETTE == 1
 									BlitSpriteExtended(i,bt,(y<<8)+x,(dy<<8)+dx);						
 								#else
 									BlitSprite3bpp(i,bt,(y<<8)+x,(dy<<8)+dx);						
 								#endif
+							#endif
 							}
 
 					//	}
